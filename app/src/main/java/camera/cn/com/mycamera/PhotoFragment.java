@@ -3,6 +3,7 @@ package camera.cn.com.mycamera;
 
 import android.Manifest;
 import android.annotation.SuppressLint;
+import android.app.Activity;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.graphics.SurfaceTexture;
@@ -11,19 +12,23 @@ import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
+import android.hardware.camera2.CameraMetadata;
 import android.hardware.camera2.CaptureFailure;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.CaptureResult;
 import android.hardware.camera2.TotalCaptureResult;
+import android.media.Image;
 import android.media.ImageReader;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.app.Fragment;
 import android.util.Log;
 import android.util.Size;
+import android.util.SparseIntArray;
 import android.view.LayoutInflater;
 import android.view.Surface;
 import android.view.TextureView;
@@ -31,9 +36,37 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.Arrays;
 
 public class PhotoFragment extends Fragment {
+    /**
+     * Camera state: Showing camera preview.
+     */
+    private static final int STATE_PREVIEW = 0;
+
+    /**
+     * Camera state: Waiting for the focus to be locked.
+     */
+    private static final int STATE_WAITTING_LOCK = 1;
+
+    /**
+     * Camera state: Waiting for the exposure to be precapture state.
+     */
+    private static final int STATE_WAITING_PRECAPTURE = 2;
+
+    /**
+     * Camera state: Waiting for the exposure state to be something other than precapture.
+     */
+    private static final int STATE_WAITING_NON_PRECAPTURE = 3;
+
+    /**
+     * Camera state: Picture was taken.
+     */
+    private static final int STATE_PICTURE_TAKEN = 4;
     String TAG = "MyLog-PhotoFragment.java";
     private CameraManager mCameraManager;
     private Context mContext;
@@ -49,7 +82,20 @@ public class PhotoFragment extends Fragment {
     private CaptureRequest.Builder mPreviewRequestBuilder;
     SurfaceTexture mSurfaceTexture;
     CaptureRequest mCaptureRequest;
+    CameraCaptureSession mCaptureSession;
     private Button mShutterButton;
+    private int mPreviewState = STATE_PREVIEW;
+    private ImageReader mImageReader;
+    private File mFile;
+    private static final SparseIntArray ORIENTATIONS = new SparseIntArray();
+    private int mSensorOrientation;
+    private  CameraCharacteristics cameraCharacteristics;
+    static {
+        ORIENTATIONS.append(Surface.ROTATION_0, 90);
+        ORIENTATIONS.append(Surface.ROTATION_90, 0);
+        ORIENTATIONS.append(Surface.ROTATION_180, 270);
+        ORIENTATIONS.append(Surface.ROTATION_270, 180);
+    }
 
     public PhotoFragment(){
 
@@ -58,6 +104,12 @@ public class PhotoFragment extends Fragment {
     @SuppressLint("ValidFragment")
     public PhotoFragment(Context mContext) {
         this.mContext = mContext;
+    }
+
+    @Override
+    public void onActivityCreated(@Nullable Bundle savedInstanceState) {
+        super.onActivityCreated(savedInstanceState);
+        mFile = new File(getActivity().getExternalFilesDir(null), "pic.jpg");
     }
 
     @Override
@@ -96,7 +148,7 @@ public class PhotoFragment extends Fragment {
             final String[] ids = mCameraManager.getCameraIdList();
             numCamera = ids.length;
             for (String id : ids) {
-                CameraCharacteristics cameraCharacteristics = mCameraManager.getCameraCharacteristics(id);
+                cameraCharacteristics = mCameraManager.getCameraCharacteristics(id);
                 int orientation = cameraCharacteristics.get(CameraCharacteristics.LENS_FACING);
                 if (orientation == CameraCharacteristics.LENS_FACING_BACK) {
                     backCameraId = id;
@@ -118,6 +170,7 @@ public class PhotoFragment extends Fragment {
      **/
     public void openCamera() {
         Log.e(TAG,"openCamera()=======>>");
+        mSensorOrientation = cameraCharacteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);//后来增加
         try {
             if (ActivityCompat.checkSelfPermission(getActivity(), Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(getActivity(),new String[]{android.Manifest.permission.CAMERA},0);
@@ -182,6 +235,7 @@ public class PhotoFragment extends Fragment {
                         @Override
                         public void onConfigured( CameraCaptureSession cameraCaptureSession) {
                             Log.e(TAG,"startPreview()=======>>onConfigured()");
+                            mCaptureSession = cameraCaptureSession;
                             try {
                                 cameraCaptureSession.setRepeatingRequest(mCaptureRequest,captureCallback,mBackgroundHandler);
                             } catch (CameraAccessException e) {
@@ -267,6 +321,164 @@ public class PhotoFragment extends Fragment {
         @Override
         public void onClick(View view) {
             Log.e(TAG,"onClick()=======>>ShutterButton Clicked");
+            try{
+                //1、对焦
+                mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER, CameraMetadata.CONTROL_AF_TRIGGER_START);
+                mPreviewState = STATE_WAITTING_LOCK;
+                mCaptureSession.capture(mPreviewRequestBuilder.build(),captureCallback,mBackgroundHandler);
+            }catch (Exception ignore){
+
+            }
         }
     };
+
+    private CameraCaptureSession.CaptureCallback mCaptureCallback = new CameraCaptureSession.CaptureCallback() {
+        @Override
+        public void onCaptureStarted(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, long timestamp, long frameNumber) {
+            super.onCaptureStarted(session, request, timestamp, frameNumber);
+        }
+
+        @Override
+        public void onCaptureProgressed(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull CaptureResult partialResult) {
+            super.onCaptureProgressed(session, request, partialResult);
+        }
+
+        @Override
+        public void onCaptureCompleted(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull TotalCaptureResult result) {
+            super.onCaptureCompleted(session, request, result);
+            Integer afState = result.get(CaptureResult.CONTROL_AF_STATE);
+            if (afState == null) {
+                captureStillPicture();
+            } else if (CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED == afState ||
+                    CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED == afState) {
+                Integer aeState = result.get(CaptureResult.CONTROL_AE_STATE);
+                if (aeState == null ||
+                        aeState == CaptureResult.CONTROL_AE_STATE_CONVERGED) {
+                    mPreviewState = STATE_PICTURE_TAKEN;
+                    captureStillPicture();
+                } else {
+                    runPrecaptureSequence();
+                }
+            }
+        }
+    };
+
+    private void captureStillPicture(){
+        try {
+            final Activity activity = getActivity();
+            if (null == activity ||  null == mCameraDevice) {
+                return;
+            }
+            final CaptureRequest.Builder captureBuilder =
+                    mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
+            captureBuilder.addTarget(mImageReader.getSurface());
+
+            captureBuilder.set(CaptureRequest.CONTROL_AF_MODE,
+                    CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
+            //setAutoFlash(captureBuilder);
+
+            int rotation = activity.getWindowManager().getDefaultDisplay().getRotation();
+            captureBuilder.set(CaptureRequest.JPEG_ORIENTATION, getOrientation(rotation));
+
+            CameraCaptureSession.CaptureCallback CaptureCallback
+                    = new CameraCaptureSession.CaptureCallback() {
+
+                @Override
+                public void onCaptureCompleted(@NonNull CameraCaptureSession session,
+                                               @NonNull CaptureRequest request,
+                                               @NonNull TotalCaptureResult result) {
+                    Log.e(TAG, "onCaptureCompleted()=======>>");
+                    unlockFocus();
+                }
+            };
+
+            mCaptureSession.stopRepeating();
+            //mCaptureSession.abortCaptures();
+            mCaptureSession.capture(captureBuilder.build(), CaptureCallback, null);
+        } catch (CameraAccessException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void unlockFocus() {
+        try {
+            mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER,
+                    CameraMetadata.CONTROL_AF_TRIGGER_CANCEL);
+            mCaptureSession.capture(mPreviewRequestBuilder.build(), mCaptureCallback,
+                    mBackgroundHandler);
+            mPreviewState = STATE_PREVIEW;
+            mCaptureSession.setRepeatingRequest(mCaptureRequest, mCaptureCallback,
+                    mBackgroundHandler);
+        } catch (CameraAccessException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private final ImageReader.OnImageAvailableListener mOnImageAvailableListener
+            = new ImageReader.OnImageAvailableListener() {
+
+        @Override
+        public void onImageAvailable(ImageReader reader) {
+            mBackgroundHandler.post(new ImageSaver(reader.acquireNextImage(), mFile));
+        }
+
+    };
+
+    private static class ImageSaver implements Runnable {
+
+        /**
+         * The JPEG image
+         */
+        private final Image mImage;
+        /**
+         * The file we save the image into.
+         */
+        private final File mFile;
+
+        ImageSaver(Image image, File file) {
+            mImage = image;
+            mFile = file;
+        }
+
+        @Override
+        public void run() {
+            ByteBuffer buffer = mImage.getPlanes()[0].getBuffer();
+            byte[] bytes = new byte[buffer.remaining()];
+            buffer.get(bytes);
+            FileOutputStream output = null;
+            try {
+                output = new FileOutputStream(mFile);
+                output.write(bytes);
+            } catch (IOException e) {
+                e.printStackTrace();
+            } finally {
+                mImage.close();
+                if (null != output) {
+                    try {
+                        output.close();
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                }
+            }
+        }
+
+    }
+
+    private void runPrecaptureSequence() {
+        try {
+            mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER,
+                    CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START);
+            mPreviewState = STATE_WAITING_PRECAPTURE;
+            mCaptureSession.capture(mPreviewRequestBuilder.build(), mCaptureCallback,
+                    mBackgroundHandler);
+        } catch (CameraAccessException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private int getOrientation(int rotation) {
+        return (ORIENTATIONS.get(rotation) + mSensorOrientation + 270) % 360;
+    }
+
 }
