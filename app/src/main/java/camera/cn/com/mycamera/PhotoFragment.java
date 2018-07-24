@@ -6,6 +6,7 @@ import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.graphics.ImageFormat;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
@@ -17,6 +18,7 @@ import android.hardware.camera2.CaptureFailure;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.CaptureResult;
 import android.hardware.camera2.TotalCaptureResult;
+import android.hardware.camera2.params.StreamConfigurationMap;
 import android.media.Image;
 import android.media.ImageReader;
 import android.os.Bundle;
@@ -41,6 +43,8 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
 
 public class PhotoFragment extends Fragment {
     /**
@@ -67,7 +71,7 @@ public class PhotoFragment extends Fragment {
      * Camera state: Picture was taken.
      */
     private static final int STATE_PICTURE_TAKEN = 4;
-    String TAG = "MyLog-PhotoFragment.java";
+    private static String TAG = "MyLog-PhotoFragment.java";
     private CameraManager mCameraManager;
     private Context mContext;
     private int numCamera;
@@ -171,6 +175,16 @@ public class PhotoFragment extends Fragment {
     public void openCamera() {
         Log.e(TAG,"openCamera()=======>>");
         mSensorOrientation = cameraCharacteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);//后来增加
+        StreamConfigurationMap map = cameraCharacteristics.get(
+                CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+        Size largest = Collections.max(
+                Arrays.asList(map.getOutputSizes(ImageFormat.JPEG)),
+                new CompareSizesByArea());
+        mImageReader = ImageReader.newInstance(largest.getWidth(), largest.getHeight(),
+                ImageFormat.JPEG, /*maxImages*/2);
+        mImageReader.setOnImageAvailableListener(mOnImageAvailableListener,mBackgroundHandler);
+
+
         try {
             if (ActivityCompat.checkSelfPermission(getActivity(), Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(getActivity(),new String[]{android.Manifest.permission.CAMERA},0);
@@ -180,6 +194,16 @@ public class PhotoFragment extends Fragment {
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
+    }
+
+    static class CompareSizesByArea implements Comparator<Size> {
+
+        @Override
+        public int compare(Size lhs, Size rhs) {
+            return Long.signum((long) lhs.getWidth() * lhs.getHeight() -
+                    (long) rhs.getWidth() * rhs.getHeight());
+        }
+
     }
 
     /**
@@ -230,7 +254,7 @@ public class PhotoFragment extends Fragment {
             mPreviewRequestBuilder = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
             mPreviewRequestBuilder.addTarget(surface);//添加一个surface用来接收数据
             mCaptureRequest = mPreviewRequestBuilder.build();
-            mCameraDevice.createCaptureSession(Arrays.asList(surface),
+            mCameraDevice.createCaptureSession(Arrays.asList(surface,mImageReader.getSurface()),
                     new CameraCaptureSession.StateCallback() {
                         @Override
                         public void onConfigured( CameraCaptureSession cameraCaptureSession) {
@@ -325,7 +349,7 @@ public class PhotoFragment extends Fragment {
                 //1、对焦
                 mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER, CameraMetadata.CONTROL_AF_TRIGGER_START);
                 mPreviewState = STATE_WAITTING_LOCK;
-                mCaptureSession.capture(mPreviewRequestBuilder.build(),captureCallback,mBackgroundHandler);
+                mCaptureSession.capture(mPreviewRequestBuilder.build(),mCaptureCallback,mBackgroundHandler);
             }catch (Exception ignore){
 
             }
@@ -346,17 +370,23 @@ public class PhotoFragment extends Fragment {
         @Override
         public void onCaptureCompleted(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull TotalCaptureResult result) {
             super.onCaptureCompleted(session, request, result);
+            Log.e(TAG,"onCaptureCompleted()=======>>");
             Integer afState = result.get(CaptureResult.CONTROL_AF_STATE);
             if (afState == null) {
+                Log.e(TAG,"onCaptureCompleted()=======>>afState == null");
                 captureStillPicture();
             } else if (CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED == afState ||
-                    CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED == afState) {
+                    CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED == afState ||
+                    CaptureResult.CONTROL_AF_STATE_PASSIVE_SCAN == afState) {
+                Log.e(TAG,"onCaptureCompleted()=======>>else if");
                 Integer aeState = result.get(CaptureResult.CONTROL_AE_STATE);
                 if (aeState == null ||
                         aeState == CaptureResult.CONTROL_AE_STATE_CONVERGED) {
+                    Log.e(TAG,"onCaptureCompleted()=======>>afState == null2");
                     mPreviewState = STATE_PICTURE_TAKEN;
                     captureStillPicture();
                 } else {
+                    Log.e(TAG,"onCaptureCompleted()=======>>else");
                     runPrecaptureSequence();
                 }
             }
@@ -364,9 +394,11 @@ public class PhotoFragment extends Fragment {
     };
 
     private void captureStillPicture(){
+        Log.e(TAG,"captureStillPicture()=======>>");
         try {
             final Activity activity = getActivity();
             if (null == activity ||  null == mCameraDevice) {
+                Log.e(TAG,"captureStillPicture()=======>>null == activity ||  null == mCameraDevice");
                 return;
             }
             final CaptureRequest.Builder captureBuilder =
@@ -387,7 +419,7 @@ public class PhotoFragment extends Fragment {
                 public void onCaptureCompleted(@NonNull CameraCaptureSession session,
                                                @NonNull CaptureRequest request,
                                                @NonNull TotalCaptureResult result) {
-                    Log.e(TAG, "onCaptureCompleted()=======>>");
+                    Log.e(TAG, "captureStillPicture()=======>>onCaptureCompleted()");
                     unlockFocus();
                 }
             };
@@ -401,6 +433,7 @@ public class PhotoFragment extends Fragment {
     }
 
     private void unlockFocus() {
+        Log.e(TAG,"unlockFocus()=======>>");
         try {
             mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER,
                     CameraMetadata.CONTROL_AF_TRIGGER_CANCEL);
@@ -419,6 +452,7 @@ public class PhotoFragment extends Fragment {
 
         @Override
         public void onImageAvailable(ImageReader reader) {
+            Log.e(TAG,"onImageAvailable()=======>>");
             mBackgroundHandler.post(new ImageSaver(reader.acquireNextImage(), mFile));
         }
 
@@ -442,6 +476,7 @@ public class PhotoFragment extends Fragment {
 
         @Override
         public void run() {
+            Log.e(TAG,"ImageSaver.run()=======>>");
             ByteBuffer buffer = mImage.getPlanes()[0].getBuffer();
             byte[] bytes = new byte[buffer.remaining()];
             buffer.get(bytes);
@@ -466,6 +501,7 @@ public class PhotoFragment extends Fragment {
     }
 
     private void runPrecaptureSequence() {
+        Log.e(TAG,"runPrecaptureSequence()=======>>");
         try {
             mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER,
                     CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START);
