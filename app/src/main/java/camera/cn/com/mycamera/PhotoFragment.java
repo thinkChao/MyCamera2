@@ -47,30 +47,17 @@ import java.util.Collections;
 import java.util.Comparator;
 
 public class PhotoFragment extends Fragment {
-    /**
-     * Camera state: Showing camera preview.
-     */
-    private static final int STATE_PREVIEW = 0;
 
-    /**
-     * Camera state: Waiting for the focus to be locked.
-     */
-    private static final int STATE_WAITTING_LOCK = 1;
+    private static final int STATE_PREVIEW = 0;  //正在预览状态
 
-    /**
-     * Camera state: Waiting for the exposure to be precapture state.
-     */
+    private static final int STATE_WAITTING_LOCK = 1;  //等待对焦
+
     private static final int STATE_WAITING_PRECAPTURE = 2;
 
-    /**
-     * Camera state: Waiting for the exposure state to be something other than precapture.
-     */
     private static final int STATE_WAITING_NON_PRECAPTURE = 3;
 
-    /**
-     * Camera state: Picture was taken.
-     */
-    private static final int STATE_PICTURE_TAKEN = 4;
+    private static final int STATE_PICTURE_TAKEN = 4;   //拍照结束
+
     private static String TAG = "MyLog-PhotoFragment.java";
     private CameraManager mCameraManager;
     private Context mContext;
@@ -371,25 +358,32 @@ public class PhotoFragment extends Fragment {
         public void onCaptureCompleted(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull TotalCaptureResult result) {
             super.onCaptureCompleted(session, request, result);
             Log.e(TAG,"onCaptureCompleted()=======>>");
-            Integer afState = result.get(CaptureResult.CONTROL_AF_STATE);
-            if (afState == null) {
-                Log.e(TAG,"onCaptureCompleted()=======>>afState == null");
-                captureStillPicture();
-            } else if (CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED == afState ||
-                    CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED == afState ||
-                    CaptureResult.CONTROL_AF_STATE_PASSIVE_SCAN == afState) {
-                Log.e(TAG,"onCaptureCompleted()=======>>else if");
-                Integer aeState = result.get(CaptureResult.CONTROL_AE_STATE);
-                if (aeState == null ||
-                        aeState == CaptureResult.CONTROL_AE_STATE_CONVERGED) {
-                    Log.e(TAG,"onCaptureCompleted()=======>>afState == null2");
-                    mPreviewState = STATE_PICTURE_TAKEN;
-                    captureStillPicture();
-                } else {
-                    Log.e(TAG,"onCaptureCompleted()=======>>else");
-                    runPrecaptureSequence();
+            switch(mPreviewState){
+                case STATE_WAITTING_LOCK:{
+                    Integer afState = result.get(CaptureResult.CONTROL_AF_STATE);
+                    if (afState == null) {
+                        Log.e(TAG,"onCaptureCompleted()=======>>afState == null");
+                        captureStillPicture();
+                    } else if (CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED == afState ||
+                            CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED == afState ||
+                            CaptureResult.CONTROL_AF_STATE_PASSIVE_SCAN == afState) {
+                        Log.e(TAG,"onCaptureCompleted()=======>>else if");
+                        Integer aeState = result.get(CaptureResult.CONTROL_AE_STATE);
+                        if (aeState == null ||
+                                aeState == CaptureResult.CONTROL_AE_STATE_CONVERGED) {
+                            Log.e(TAG,"onCaptureCompleted()=======>>afState == null2");
+                            mPreviewState = STATE_PICTURE_TAKEN;
+                            captureStillPicture();
+                        } else {
+                            Log.e(TAG,"onCaptureCompleted()=======>>else");
+                            runPrecaptureSequence();
+                        }
+                    }
+                    break;
                 }
+
             }
+
         }
     };
 
