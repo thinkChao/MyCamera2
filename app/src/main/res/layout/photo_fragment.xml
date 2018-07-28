@@ -6,8 +6,8 @@
 
     <camera.cn.com.mycamera.PhotoTextureView
         android:id="@+id/photo_texture_view"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
+        android:layout_width="200dp"
+        android:layout_height="1080dp"
         android:layout_alignParentTop="true" />
 
     <LinearLayout

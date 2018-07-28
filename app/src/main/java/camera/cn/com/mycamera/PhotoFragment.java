@@ -170,7 +170,7 @@ public class PhotoFragment extends Fragment {
         mImageReader = ImageReader.newInstance(largest.getWidth(), largest.getHeight(),
                 ImageFormat.JPEG, /*maxImages*/2);
         mImageReader.setOnImageAvailableListener(mOnImageAvailableListener,mBackgroundHandler);
-
+        //以上貌似都跟打开相机没什么关系
 
         try {
             if (ActivityCompat.checkSelfPermission(getActivity(), Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
@@ -183,14 +183,93 @@ public class PhotoFragment extends Fragment {
         }
     }
 
-    static class CompareSizesByArea implements Comparator<Size> {
-
-        @Override
-        public int compare(Size lhs, Size rhs) {
-            return Long.signum((long) lhs.getWidth() * lhs.getHeight() -
-                    (long) rhs.getWidth() * rhs.getHeight());
+    /**
+     *第三步：开启预览
+     **/
+    public void startPreview(){
+        Log.e(TAG,"startPreview()=======>>");
+        if(mCameraDevice == null){
+            return;
         }
+        try {
+           // mSurfaceTexture.setDefaultBufferSize(1920,1080);
+            Surface surface = new Surface(mSurfaceTexture);
+            mPreviewRequestBuilder = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
+            mPreviewRequestBuilder.addTarget(surface);//添加一个surface用来接收数据
+            mCaptureRequest = mPreviewRequestBuilder.build();
+            mCameraDevice.createCaptureSession(Arrays.asList(surface,mImageReader.getSurface()),
+                    new CameraCaptureSession.StateCallback() {
+                        @Override
+                        public void onConfigured( CameraCaptureSession cameraCaptureSession) {
+                            Log.e(TAG,"startPreview()=======>>onConfigured()");
+                            mCaptureSession = cameraCaptureSession;
+                            try {
+                                cameraCaptureSession.setRepeatingRequest(mCaptureRequest,mCaptureCallback,mBackgroundHandler);
+                            } catch (CameraAccessException e) {
+                                e.printStackTrace();
+                            }
+                        }
 
+                        @Override
+                        public void onConfigureFailed(CameraCaptureSession cameraCaptureSession) {
+                            Log.e(TAG,"startPreview()=======>>onConfigureFailed()");
+
+                        }
+                    },null);
+        } catch (CameraAccessException e) {
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     *第四步：拍照
+     **/
+    private void captureStillPicture(){
+        Log.e(TAG,"captureStillPicture()=======>>");
+        try {
+            final Activity activity = getActivity();
+            if (null == activity ||  null == mCameraDevice) {
+                return;
+            }
+            final CaptureRequest.Builder captureBuilder =
+                    mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
+            captureBuilder.addTarget(mImageReader.getSurface());
+
+            captureBuilder.set(CaptureRequest.CONTROL_AF_MODE,
+                    CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
+
+            int rotation = activity.getWindowManager().getDefaultDisplay().getRotation();
+            captureBuilder.set(CaptureRequest.JPEG_ORIENTATION, getOrientation(rotation));
+            mCaptureSession.stopRepeating();
+
+            CameraCaptureSession.CaptureCallback mCaptureCallback2
+                    = new CameraCaptureSession.CaptureCallback() {
+
+                @Override
+                public void onCaptureCompleted(@NonNull CameraCaptureSession session,
+                                               @NonNull CaptureRequest request,
+                                               @NonNull TotalCaptureResult result) {
+                    Log.e(TAG, "captureStillPicture()=======>>onCaptureCompleted()");
+                    unlockFocus();
+                }
+            };
+            mCaptureSession.capture(captureBuilder.build(), mCaptureCallback2, null);
+        } catch (CameraAccessException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void runPrecaptureSequence() {
+        Log.e(TAG,"runPrecaptureSequence()=======>>");
+        try {
+            mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER,
+                    CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START);
+            mPreviewState = STATE_WAITING_PRECAPTURE;
+            mCaptureSession.capture(mPreviewRequestBuilder.build(), mCaptureCallback,
+                    mBackgroundHandler);
+        } catch (CameraAccessException e) {
+            e.printStackTrace();
+        }
     }
 
     /**
@@ -227,43 +306,7 @@ public class PhotoFragment extends Fragment {
         mBackgroundHandler = new Handler(mBackgroundThread.getLooper());
     }
 
-    /**
-     *第三步：开启预览
-     **/
-    public void startPreview(){
-        Log.e(TAG,"startPreview()=======>>");
-        if(mCameraDevice == null){
-            return;
-        }
-        try {
-            mSurfaceTexture.setDefaultBufferSize(1920,1080);
-            Surface surface = new Surface(mSurfaceTexture);
-            mPreviewRequestBuilder = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
-            mPreviewRequestBuilder.addTarget(surface);//添加一个surface用来接收数据
-            mCaptureRequest = mPreviewRequestBuilder.build();
-            mCameraDevice.createCaptureSession(Arrays.asList(surface,mImageReader.getSurface()),
-                    new CameraCaptureSession.StateCallback() {
-                        @Override
-                        public void onConfigured( CameraCaptureSession cameraCaptureSession) {
-                            Log.e(TAG,"startPreview()=======>>onConfigured()");
-                            mCaptureSession = cameraCaptureSession;
-                            try {
-                                cameraCaptureSession.setRepeatingRequest(mCaptureRequest,captureCallback,mBackgroundHandler);
-                            } catch (CameraAccessException e) {
-                                e.printStackTrace();
-                            }
-                        }
 
-                        @Override
-                        public void onConfigureFailed(CameraCaptureSession cameraCaptureSession) {
-                            Log.e(TAG,"startPreview()=======>>onConfigureFailed()");
-
-                        }
-                    },null);
-        } catch (CameraAccessException e) {
-            e.printStackTrace();
-        }
-    }
 
     private final TextureView.SurfaceTextureListener mSurfaceTextureListener
             = new TextureView.SurfaceTextureListener() {
@@ -287,46 +330,10 @@ public class PhotoFragment extends Fragment {
 
         @Override
         public void onSurfaceTextureUpdated(SurfaceTexture surfaceTexture) {
-           // Log.e(TAG,"onSurfaceTextureUpdated()=======>>");
+            // Log.e(TAG,"onSurfaceTextureUpdated()=======>>");
         }
     };
 
-    private CameraCaptureSession.CaptureCallback captureCallback = new CameraCaptureSession.CaptureCallback() {
-        @Override
-        public void onCaptureStarted(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, long timestamp, long frameNumber) {
-            super.onCaptureStarted(session, request, timestamp, frameNumber);
-        }
-
-        @Override
-        public void onCaptureProgressed(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull CaptureResult partialResult) {
-            super.onCaptureProgressed(session, request, partialResult);
-        }
-
-        @Override
-        public void onCaptureCompleted(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull TotalCaptureResult result) {
-            super.onCaptureCompleted(session, request, result);
-        }
-
-        @Override
-        public void onCaptureFailed(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull CaptureFailure failure) {
-            super.onCaptureFailed(session, request, failure);
-        }
-
-        @Override
-        public void onCaptureSequenceCompleted(@NonNull CameraCaptureSession session, int sequenceId, long frameNumber) {
-            super.onCaptureSequenceCompleted(session, sequenceId, frameNumber);
-        }
-
-        @Override
-        public void onCaptureSequenceAborted(@NonNull CameraCaptureSession session, int sequenceId) {
-            super.onCaptureSequenceAborted(session, sequenceId);
-        }
-
-        @Override
-        public void onCaptureBufferLost(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull Surface target, long frameNumber) {
-            super.onCaptureBufferLost(session, request, target, frameNumber);
-        }
-    };
 
     View.OnClickListener shutterButtonCllickListener = new View.OnClickListener() {
         @Override
@@ -344,88 +351,39 @@ public class PhotoFragment extends Fragment {
     };
 
     private CameraCaptureSession.CaptureCallback mCaptureCallback = new CameraCaptureSession.CaptureCallback() {
-        @Override
-        public void onCaptureStarted(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, long timestamp, long frameNumber) {
-            super.onCaptureStarted(session, request, timestamp, frameNumber);
-        }
-
-        @Override
-        public void onCaptureProgressed(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull CaptureResult partialResult) {
-            super.onCaptureProgressed(session, request, partialResult);
-        }
 
         @Override
         public void onCaptureCompleted(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, @NonNull TotalCaptureResult result) {
             super.onCaptureCompleted(session, request, result);
-            Log.e(TAG,"onCaptureCompleted()=======>>");
             switch(mPreviewState){
                 case STATE_WAITTING_LOCK:{
                     Integer afState = result.get(CaptureResult.CONTROL_AF_STATE);
                     if (afState == null) {
-                        Log.e(TAG,"onCaptureCompleted()=======>>afState == null");
                         captureStillPicture();
                     } else if (CaptureResult.CONTROL_AF_STATE_FOCUSED_LOCKED == afState ||
                             CaptureResult.CONTROL_AF_STATE_NOT_FOCUSED_LOCKED == afState ||
                             CaptureResult.CONTROL_AF_STATE_PASSIVE_SCAN == afState) {
-                        Log.e(TAG,"onCaptureCompleted()=======>>else if");
                         Integer aeState = result.get(CaptureResult.CONTROL_AE_STATE);
                         if (aeState == null ||
                                 aeState == CaptureResult.CONTROL_AE_STATE_CONVERGED) {
-                            Log.e(TAG,"onCaptureCompleted()=======>>afState == null2");
                             mPreviewState = STATE_PICTURE_TAKEN;
                             captureStillPicture();
                         } else {
-                            Log.e(TAG,"onCaptureCompleted()=======>>else");
                             runPrecaptureSequence();
                         }
                     }
                     break;
                 }
-
+                case STATE_PREVIEW:{
+                    break;
+                }
             }
-
         }
     };
 
-    private void captureStillPicture(){
-        Log.e(TAG,"captureStillPicture()=======>>");
-        try {
-            final Activity activity = getActivity();
-            if (null == activity ||  null == mCameraDevice) {
-                Log.e(TAG,"captureStillPicture()=======>>null == activity ||  null == mCameraDevice");
-                return;
-            }
-            final CaptureRequest.Builder captureBuilder =
-                    mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
-            captureBuilder.addTarget(mImageReader.getSurface());
-
-            captureBuilder.set(CaptureRequest.CONTROL_AF_MODE,
-                    CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
-            //setAutoFlash(captureBuilder);
-
-            int rotation = activity.getWindowManager().getDefaultDisplay().getRotation();
-            captureBuilder.set(CaptureRequest.JPEG_ORIENTATION, getOrientation(rotation));
-
-            CameraCaptureSession.CaptureCallback CaptureCallback
-                    = new CameraCaptureSession.CaptureCallback() {
-
-                @Override
-                public void onCaptureCompleted(@NonNull CameraCaptureSession session,
-                                               @NonNull CaptureRequest request,
-                                               @NonNull TotalCaptureResult result) {
-                    Log.e(TAG, "captureStillPicture()=======>>onCaptureCompleted()");
-                    unlockFocus();
-                }
-            };
-
-            mCaptureSession.stopRepeating();
-            //mCaptureSession.abortCaptures();
-            mCaptureSession.capture(captureBuilder.build(), CaptureCallback, null);
-        } catch (CameraAccessException e) {
-            e.printStackTrace();
-        }
-    }
-
+    /**
+     *取消对焦
+     **/
     private void unlockFocus() {
         Log.e(TAG,"unlockFocus()=======>>");
         try {
@@ -451,6 +409,16 @@ public class PhotoFragment extends Fragment {
         }
 
     };
+
+    static class CompareSizesByArea implements Comparator<Size> {
+
+        @Override
+        public int compare(Size lhs, Size rhs) {
+            return Long.signum((long) lhs.getWidth() * lhs.getHeight() -
+                    (long) rhs.getWidth() * rhs.getHeight());
+        }
+
+    }
 
     private static class ImageSaver implements Runnable {
 
@@ -492,19 +460,6 @@ public class PhotoFragment extends Fragment {
             }
         }
 
-    }
-
-    private void runPrecaptureSequence() {
-        Log.e(TAG,"runPrecaptureSequence()=======>>");
-        try {
-            mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER,
-                    CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START);
-            mPreviewState = STATE_WAITING_PRECAPTURE;
-            mCaptureSession.capture(mPreviewRequestBuilder.build(), mCaptureCallback,
-                    mBackgroundHandler);
-        } catch (CameraAccessException e) {
-            e.printStackTrace();
-        }
     }
 
     private int getOrientation(int rotation) {
