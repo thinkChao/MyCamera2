@@ -103,33 +103,74 @@ public class PhotoFragment extends Fragment {
     }
 
     @Override
-    public void onActivityCreated(@Nullable Bundle savedInstanceState) {
-        super.onActivityCreated(savedInstanceState);
-        mFile = new File(getActivity().getExternalFilesDir(null), "pic.jpg");
+    public void onCreate(@Nullable Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        Log.e(TAG,"onCreate()=======>>");
     }
 
     @Override
     public View onCreateView( LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState) {
+        Log.e(TAG,"onCreateView()=======>>");
         return inflater.inflate(R.layout.photo_fragment, container, false);
     }
 
     @Override
+    public void onActivityCreated(@Nullable Bundle savedInstanceState) {
+        Log.e(TAG,"onActivityCreated()=======>>");
+        super.onActivityCreated(savedInstanceState);
+    }
+
+    @Override
     public void onViewCreated(View view, Bundle savedInstanceState) {
+        Log.e(TAG,"onViewCreated()=======>>");
         super.onViewCreated(view, savedInstanceState);
         mTextureView = (PhotoTextureView) view.findViewById(R.id.photo_texture_view);
         mShutterButton = (Button)view.findViewById(R.id.shutter_button);
         mShutterButton.setOnClickListener(shutterButtonCllickListener);
     }
 
+    @Override
+    public void onStart() {
+        Log.e(TAG,"onStart()=======>>");
+        super.onStart();
+    }
 
     @Override
     public void onResume() {
+        Log.e(TAG,"onResume()=======>>");
         super.onResume();
+        mFile = new File(getActivity().getExternalFilesDir(null), "pic.jpg");
+
         startBackgroundThread();//打开相机的操作在这个线程中，所以这里先开启这个线程
         detectCamera();
         openCamera();
         mTextureView.setSurfaceTextureListener(mSurfaceTextureListener);
         //startPreview();开启预览要在SurfaceTexture创建后开始，所以这里直接将预览放在了创建SurfaceTexture的回调里
+        if(mTextureView == null){
+            mTextureView.setSurfaceTextureListener(mSurfaceTextureListener);
+        }else{
+            startPreview();
+        }
+    }
+
+    @Override
+    public void onPause() {
+        Log.e(TAG,"onPause()=======>>");
+        super.onPause();
+    }
+
+    @Override
+    public void onStop() {
+        Log.e(TAG,"onStop()=======>>");
+        super.onStop();
+        stopPreview();
+        closeCamera();
+    }
+
+    @Override
+    public void onDestroy() {
+        Log.e(TAG,"onDestroy()=======>>");
+        super.onDestroy();
 
     }
 
@@ -189,7 +230,7 @@ public class PhotoFragment extends Fragment {
             return;
         }
         try {
-            mSurfaceTexture.setDefaultBufferSize(2160,1080);//设置预览尺寸
+            mSurfaceTexture.setDefaultBufferSize(1080,1080);//设置预览尺寸
             Surface surface = new Surface(mSurfaceTexture);//创建Surface
             mPreviewRequestBuilder = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);//创建预览请求
             mPreviewRequestBuilder.addTarget(surface);//添加一个surface用来接收数据
@@ -349,6 +390,24 @@ public class PhotoFragment extends Fragment {
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
+    }
+
+    /**
+     * 第七步：关闭预览
+     * 关闭预览，就是关闭当前会话
+     */
+    private void stopPreview(){
+        if(mCaptureSession != null){
+            mCaptureSession.close();
+            mCaptureSession=null;
+        }
+    }
+    /**
+     * 第八步：释放相机资源
+     * 关闭预览，就是关闭当前会话
+     */
+    private void closeCamera(){
+        mCameraDevice.close();
     }
 
     /**
